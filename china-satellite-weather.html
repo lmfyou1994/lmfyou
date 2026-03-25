@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>风云卫星云图 · 中国气象监测</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+SC:wght@300;400;700&display=swap');
+
+  :root {
+    --cyan: #00e5ff;
+    --cyan-dim: rgba(0,229,255,0.15);
+    --cyan-border: rgba(0,229,255,0.35);
+    --amber: #ffab00;
+    --red: #ff4444;
+    --green: #69ff47;
+    --bg: #030c14;
+    --panel: rgba(3, 18, 28, 0.88);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--cyan);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+  }
+
+  /* scanline overlay */
+  #map::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* vignette */
+  .vignette {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.72) 100%);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* top bar */
+  .top-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 52px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--cyan-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+
+  .top-bar .title-block {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .radar-icon {
+    width: 28px; height: 28px;
+    border: 2px solid var(--cyan);
+    border-radius: 50%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: radar-spin 4s linear infinite;
+  }
+  .radar-icon::before {
+    content: '';
+    position: absolute;
+    width: 0; height: 0;
+    border-left: 10px solid var(--cyan);
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    transform-origin: left center;
+    left: 50%; top: 50%;
+    margin-top: -5px;
+  }
+  @keyframes radar-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .title-zh {
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 2px;
+  }
+  .title-en {
+    font-size: 10px;
+    color: rgba(0,229,255,0.6);
+    letter-spacing: 1px;
+  }
+
+  .top-center {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .status-text {
+    font-size: 11px;
+    color: var(--green);
+    letter-spacing: 1px;
+  }
+
+  .top-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 11px;
+    color: rgba(0,229,255,0.7);
+  }
+
+  /* left panel */
+  .left-panel {
+    position: fixed;
+    top: 72px;
+    left: 16px;
+    width: 220px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .panel-card {
+    background: var(--panel);
+    border: 1px solid var(--cyan-border);
+    padding: 12px 14px;
+    backdrop-filter: blur(8px);
+    position: relative;
+    overflow: hidden;
+  }
+  .panel-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  }
+
+  .card-label {
+    font-size: 9px;
+    color: rgba(0,229,255,0.5);
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+
+  .clock {
+    font-size: 30px;
+    color: #fff;
+    letter-spacing: 2px;
+    line-height: 1;
+  }
+
+  .date-display {
+    font-size: 12px;
+    color: var(--cyan);
+    margin-top: 4px;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-weight: 300;
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(0,229,255,0.1);
+    font-size: 11px;
+  }
+  .meta-row:last-child { border-bottom: none; }
+  .meta-key { color: rgba(0,229,255,0.5); }
+  .meta-val { color: var(--cyan); }
+  .meta-val.amber { color: var(--amber); }
+  .meta-val.green { color: var(--green); }
+
+  /* date nav */
+  .date-nav {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .date-btn {
+    background: transparent;
+    border: 1px solid var(--cyan-border);
+    color: rgba(0,229,255,0.7);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex: 1;
+    min-width: 60px;
+    text-align: center;
+  }
+  .date-btn:hover, .date-btn.active {
+    background: var(--cyan-dim);
+    border-color: var(--cyan);
+    color: var(--cyan);
+    box-shadow: 0 0 8px rgba(0,229,255,0.2);
+  }
+
+  /* layer selector */
+  .layer-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--cyan-border);
+    color: rgba(0,229,255,0.7);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .layer-btn:hover, .layer-btn.active {
+    background: var(--cyan-dim);
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+  .layer-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    flex-shrink: 0;
+  }
+  .layer-btn.active .layer-dot {
+    background: var(--cyan);
+    box-shadow: 0 0 6px var(--cyan);
+  }
+
+  /* bottom bar */
+  .bottom-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 36px;
+    background: var(--panel);
+    border-top: 1px solid var(--cyan-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+    font-size: 10px;
+    color: rgba(0,229,255,0.5);
+    letter-spacing: 1px;
+  }
+
+  .bottom-bar .coords {
+    color: var(--amber);
+    font-size: 10px;
+  }
+
+  /* corner decorations */
+  .corner {
+    position: fixed;
+    width: 40px; height: 40px;
+    z-index: 20;
+    pointer-events: none;
+  }
+  .corner-tl { top: 53px; left: 0; border-top: 2px solid var(--cyan); border-left: 2px solid var(--cyan); }
+  .corner-tr { top: 53px; right: 0; border-top: 2px solid var(--cyan); border-right: 2px solid var(--cyan); }
+  .corner-bl { bottom: 37px; left: 0; border-bottom: 2px solid var(--cyan); border-left: 2px solid var(--cyan); }
+  .corner-br { bottom: 37px; right: 0; border-bottom: 2px solid var(--cyan); border-right: 2px solid var(--cyan); }
+
+  /* scanning line */
+  .scan-line {
+    position: fixed;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, var(--cyan) 30%, rgba(0,229,255,0.6) 50%, var(--cyan) 70%, transparent 100%);
+    opacity: 0.3;
+    z-index: 11;
+    pointer-events: none;
+    animation: scan 6s linear infinite;
+    top: 53px;
+  }
+  @keyframes scan {
+    0% { transform: translateY(0); opacity: 0; }
+    5% { opacity: 0.3; }
+    95% { opacity: 0.3; }
+    100% { transform: translateY(calc(100vh - 89px)); opacity: 0; }
+  }
+
+  /* leaflet overrides */
+  .leaflet-control-zoom {
+    border: 1px solid var(--cyan-border) !important;
+    background: var(--panel) !important;
+  }
+  .leaflet-control-zoom a {
+    background: transparent !important;
+    color: var(--cyan) !important;
+    border-bottom: 1px solid var(--cyan-border) !important;
+    font-size: 16px !important;
+  }
+  .leaflet-control-zoom a:hover {
+    background: var(--cyan-dim) !important;
+  }
+  .leaflet-bar { box-shadow: none !important; }
+  .leaflet-attribution-flag { display: none !important; }
+  .leaflet-control-attribution {
+    background: rgba(3,18,28,0.7) !important;
+    color: rgba(0,229,255,0.4) !important;
+    font-size: 9px !important;
+    backdrop-filter: blur(4px);
+  }
+  .leaflet-control-attribution a { color: rgba(0,229,255,0.6) !important; }
+
+  /* loading overlay */
+  #loading {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    transition: opacity 0.5s;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+
+  .loader-ring {
+    width: 60px; height: 60px;
+    border: 2px solid rgba(0,229,255,0.2);
+    border-top: 2px solid var(--cyan);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loader-text {
+    font-size: 12px;
+    color: rgba(0,229,255,0.7);
+    letter-spacing: 3px;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* notification */
+  .notif {
+    position: fixed;
+    top: 62px; right: 16px;
+    background: var(--panel);
+    border: 1px solid var(--cyan-border);
+    border-left: 3px solid var(--amber);
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--amber);
+    z-index: 200;
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    max-width: 280px;
+  }
+  .notif.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="loader-ring"></div>
+  <div class="loader-text">INITIALIZING SATELLITE FEED...</div>
+</div>
+
+<div id="map"></div>
+<div class="vignette"></div>
+<div class="scan-line"></div>
+
+<!-- corner decorations -->
+<div class="corner corner-tl"></div>
+<div class="corner corner-tr"></div>
+<div class="corner corner-bl"></div>
+<div class="corner corner-br"></div>
+
+<!-- top bar -->
+<div class="top-bar">
+  <div class="title-block">
+    <div class="radar-icon"></div>
+    <div>
+      <div class="title-zh">风云卫星 · 中国气象监测</div>
+      <div class="title-en">FENGYUN SATELLITE WEATHER MONITOR</div>
+    </div>
+  </div>
+  <div class="top-center">
+    <div class="status-dot"></div>
+    <div class="status-text" id="status-text">ACQUIRING SIGNAL...</div>
+  </div>
+  <div class="top-right">
+    <span>SAT: <span style="color:var(--cyan)">MODIS / VIIRS</span></span>
+    <span>RES: <span style="color:var(--amber)">250m</span></span>
+    <span>SRC: <span style="color:var(--green)">NASA GIBS</span></span>
+  </div>
+</div>
+
+<!-- left panel -->
+<div class="left-panel">
+
+  <!-- clock -->
+  <div class="panel-card">
+    <div class="card-label">北京时间 · BEIJING TIME</div>
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="date-display" id="date-cn">---- 年 -- 月 -- 日</div>
+  </div>
+
+  <!-- satellite info -->
+  <div class="panel-card">
+    <div class="card-label">卫星信息 · SATELLITE INFO</div>
+    <div class="meta-row">
+      <span class="meta-key">卫星</span>
+      <span class="meta-val" id="info-sat">TERRA</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-key">波段</span>
+      <span class="meta-val">真彩色 RGB</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-key">影像日期</span>
+      <span class="meta-val amber" id="info-date">--</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-key">覆盖</span>
+      <span class="meta-val green">全球</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-key">延迟</span>
+      <span class="meta-val">~1-2天</span>
+    </div>
+  </div>
+
+  <!-- date selector -->
+  <div class="panel-card">
+    <div class="card-label">日期选择 · DATE SELECT</div>
+    <div class="date-nav" id="date-nav"></div>
+  </div>
+
+  <!-- layer selector -->
+  <div class="panel-card">
+    <div class="card-label">图层 · LAYER</div>
+    <button class="layer-btn active" onclick="setLayer('terra')" id="btn-terra">
+      <span class="layer-dot"></span>MODIS Terra 真彩色
+    </button>
+    <button class="layer-btn" onclick="setLayer('aqua')" id="btn-aqua">
+      <span class="layer-dot"></span>MODIS Aqua 真彩色
+    </button>
+    <button class="layer-btn" onclick="setLayer('viirs')" id="btn-viirs">
+      <span class="layer-dot"></span>VIIRS 真彩色
+    </button>
+  </div>
+
+</div>
+
+<!-- bottom bar -->
+<div class="bottom-bar">
+  <span>数据来源：NASA EOSDIS / GIBS · 风云四号B星 105°E</span>
+  <span class="coords" id="coords">鼠标移动显示坐标</span>
+  <span>© NASA / JAXA / CMA</span>
+</div>
+
+<!-- notification -->
+<div class="notif" id="notif"></div>
+
+<script>
+  // ── state ──────────────────────────────────────────────────
+  let currentDate = '';
+  let currentLayer = 'terra';
+  let tileLayer = null;
+
+  const LAYERS = {
+    terra: {
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
+      sat: 'TERRA',
+    },
+    aqua: {
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Aqua_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
+      sat: 'AQUA',
+    },
+    viirs: {
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
+      sat: 'NOAA-20',
+    }
+  };
+
+  // ── map setup ──────────────────────────────────────────────
+  const map = L.map('map', {
+    center: [36, 104],
+    zoom: 4,
+    zoomControl: true,
+    attributionControl: true,
+  });
+
+  // base dark tiles (for context before MODIS loads)
+  const baseTile = L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+    { attribution: '&copy; CartoDB', opacity: 1, maxZoom: 19 }
+  ).addTo(map);
+
+  // ── date helpers ───────────────────────────────────────────
+  function getDateStr(offset = 0) {
+    // Returns YYYY-MM-DD in UTC, offset in days from now
+    // GIBS imagery has ~1-2 day lag; offset 0 = today, -1 = yesterday
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + offset);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function formatDateCN(dateStr) {
+    const [y, m, d] = dateStr.split('-');
+    return `${y}年${m}月${d}日`;
+  }
+
+  function buildDateNav() {
+    const nav = document.getElementById('date-nav');
+    nav.innerHTML = '';
+    const labels = ['今天', '昨天', '前天', '3天前', '4天前'];
+    for (let i = 0; i <= 4; i++) {
+      const d = getDateStr(-i);
+      const btn = document.createElement('button');
+      btn.className = 'date-btn' + (i === 1 ? ' active' : '');
+      btn.textContent = labels[i];
+      btn.title = d;
+      btn.onclick = () => {
+        document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadDate(d);
+      };
+      nav.appendChild(btn);
+    }
+    // default: yesterday (more likely to have data)
+    return getDateStr(-1);
+  }
+
+  // ── tile loading ───────────────────────────────────────────
+  function loadDate(dateStr) {
+    currentDate = dateStr;
+    document.getElementById('info-date').textContent = formatDateCN(dateStr);
+
+    if (tileLayer) map.removeLayer(tileLayer);
+
+    const layerCfg = LAYERS[currentLayer];
+    const tileUrl = layerCfg.url.replace('{date}', dateStr);
+    document.getElementById('info-sat').textContent = layerCfg.sat;
+
+    tileLayer = L.tileLayer(tileUrl, {
+      attribution: 'NASA GIBS',
+      opacity: 0.92,
+      maxZoom: 9,
+      tileSize: 256,
+      errorTileUrl: '',
+    }).addTo(map);
+
+    tileLayer.on('load', () => {
+      document.getElementById('status-text').textContent = 'SIGNAL LOCKED · DATA STREAMING';
+      showNotif(`已加载：${formatDateCN(dateStr)} · ${layerCfg.sat}`);
+      hideLoading();
+    });
+
+    tileLayer.on('tileerror', () => {
+      document.getElementById('status-text').textContent = 'PARTIAL DATA';
+    });
+  }
+
+  function setLayer(name) {
+    currentLayer = name;
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-' + name).classList.add('active');
+    loadDate(currentDate);
+  }
+
+  // ── clock ──────────────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    // Beijing time = UTC+8
+    const bjTime = new Date(now.getTime() + 8 * 3600000);
+    const h = String(bjTime.getUTCHours()).padStart(2, '0');
+    const m = String(bjTime.getUTCMinutes()).padStart(2, '0');
+    const s = String(bjTime.getUTCSeconds()).padStart(2, '0');
+    document.getElementById('clock').textContent = `${h}:${m}:${s}`;
+
+    const y = bjTime.getUTCFullYear();
+    const mo = String(bjTime.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(bjTime.getUTCDate()).padStart(2, '0');
+    const weekdays = ['日','一','二','三','四','五','六'];
+    const wd = weekdays[bjTime.getUTCDay()];
+    document.getElementById('date-cn').textContent = `${y}年${mo}月${d}日 · 周${wd}`;
+  }
+
+  // ── coordinates display ───────────────────────────────────
+  map.on('mousemove', (e) => {
+    const lat = e.latlng.lat.toFixed(3);
+    const lng = e.latlng.lng.toFixed(3);
+    const ns = lat >= 0 ? 'N' : 'S';
+    const ew = lng >= 0 ? 'E' : 'W';
+    document.getElementById('coords').textContent =
+      `${Math.abs(lat)}°${ns}  ${Math.abs(lng)}°${ew}`;
+  });
+
+  // ── notification ───────────────────────────────────────────
+  let notifTimer;
+  function showNotif(msg) {
+    const el = document.getElementById('notif');
+    el.textContent = '▶ ' + msg;
+    el.classList.add('show');
+    clearTimeout(notifTimer);
+    notifTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  function hideLoading() {
+    document.getElementById('loading').classList.add('hidden');
+  }
+
+  // ── init ───────────────────────────────────────────────────
+  const defaultDate = buildDateNav();
+  loadDate(defaultDate);
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // fallback: hide loading after 5s regardless
+  setTimeout(hideLoading, 5000);
+
+  // ── china boundary overlay ─────────────────────────────────
+  // Minimal GeoJSON boundary for reference lines
+  fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries/CHN.geo.json')
+    .then(r => r.json())
+    .then(data => {
+      L.geoJSON(data, {
+        style: {
+          color: 'rgba(0,229,255,0.5)',
+          weight: 1.2,
+          fill: false,
+          dashArray: '4,4'
+        }
+      }).addTo(map);
+    })
+    .catch(() => {}); // silently ignore if fails
+
+</script>
+</body>
+</html>
